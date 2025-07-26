@@ -22,7 +22,4 @@ All with **confidence scores**. Perfect for traders who want to adapt strategies
   - Confidence level for each
   - Combined strategic context
 
----
-
-## 🧠 Example Output
 
