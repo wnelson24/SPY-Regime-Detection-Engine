@@ -1,0 +1,88 @@
+import yfinance as yf
+import numpy as np
+import pandas as pd
+from hmmlearn.hmm import GaussianHMM
+from sklearn.preprocessing import StandardScaler
+
+def download_data(ticker='SPY', period='5y'):
+    df = yf.download(ticker, period=period)
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [' '.join(col).strip() for col in df.columns.values]
+
+    df.dropna(inplace=True)
+    return df
+
+def engineer_features(df):
+    print("\n🔍 DEBUG: DataFrame columns are:", df.columns.tolist())
+
+    close_col = next((col for col in df.columns if 'Close' in col and 'Adj' not in col), None)
+    if close_col is None:
+        raise ValueError("❌ 'Close' column not found in downloaded data!")
+
+    df['log_return'] = np.log(df[close_col] / df[close_col].shift(1))
+    df['momentum'] = df[close_col].pct_change(10)
+    df['volatility'] = df['log_return'].rolling(window=5).std()
+    df.dropna(inplace=True)
+
+    return df[['log_return', 'momentum']], df[['volatility']]
+
+def fit_hmm(features, n_regimes=3):
+    scaler = StandardScaler()
+    scaled = scaler.fit_transform(features)
+    model = GaussianHMM(n_components=n_regimes, covariance_type="full", n_iter=1000, random_state=42)
+    model.fit(scaled)
+    return model, scaler
+
+def predict_regime(model, scaler, features):
+    scaled = scaler.transform(features)[-1].reshape(1, -1)
+    probs = model.predict_proba(scaled)[0]
+    regime = int(np.argmax(probs))
+    confidence = float(probs[regime])
+    return regime, confidence
+
+def run_regime_engine():
+    df = download_data()
+    price_feats, vol_feats = engineer_features(df)
+
+    # More granular regimes
+    price_model, price_scaler = fit_hmm(price_feats, n_regimes=5)
+    vol_model, vol_scaler = fit_hmm(vol_feats, n_regimes=4)
+
+    price_regime, price_conf = predict_regime(price_model, price_scaler, price_feats)
+    vol_regime, vol_conf = predict_regime(vol_model, vol_scaler, vol_feats)
+
+    # Rich price regime labels
+    price_labels = {
+        0: "Strong Bull Trend",
+        1: "Weak Bull / Drift Up",
+        2: "Flat / No Direction",
+        3: "Weak Bear / Pullback",
+        4: "Strong Bear / Panic Selling"
+    }
+
+    # Rich volatility regime labels
+    vol_labels = {
+        0: "Low Volatility (Complacent)",
+        1: "Moderate Volatility",
+        2: "Elevated Volatility",
+        3: "High Volatility / Risk-Off"
+    }
+
+    # Label output
+    price_label = price_labels.get(price_regime, f"Price Regime {price_regime}")
+    vol_label = vol_labels.get(vol_regime, f"Vol Regime {vol_regime}")
+    combined_regime = f"{price_label} + {vol_label}"
+
+    # Terminal output
+    print(f"\n📊 Price Regime: **{price_label}**")
+    print(f"🔒 Confidence: {price_conf * 100:.2f}%")
+
+    print(f"\n🌪️ Volatility Regime: **{vol_label}**")
+    print(f"🔒 Confidence: {vol_conf * 100:.2f}%")
+
+    print(f"\n🧠 Strategic Regime: **{combined_regime}**")
+
+if __name__ == "__main__":
+    run_regime_engine()
+    input("\n✅ Done. Press Enter to exit...")
